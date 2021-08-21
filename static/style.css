@@ -46,6 +46,7 @@ body {
 
 .fwd-wave {
   background-color: brown;
+  height: 50vh;
 }
 
 .fcd-comms {
@@ -54,13 +55,14 @@ body {
 
 .coverart {
   width: 100%;
-  height: 100%;
+  height: 25vh;
   object-fit: scale-down;
 }
 
 canvas {
   width: 100%;
   height: 100%;
+  pointer-events: auto;
 }
 
 .commbarhost {
@@ -80,4 +82,8 @@ canvas {
   background-color: limegreen;
   width: 30%;
   height: 100%;
+}
+
+.shadow {
+  pointer-events: none;
 }
