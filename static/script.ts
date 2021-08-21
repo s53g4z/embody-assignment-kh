@@ -13,6 +13,30 @@ class Util {
 		ret.className = nam;
 		return ret;
 	}
+	static formatToTwoDigits(n: number): string {
+		if (n < 0)
+			throw new Error("tried to parse unsupported number");
+		else if (n < 10)
+			return "0" + n;
+		else
+			return "" + n;
+	}
+	// Helper for constructor to convert seconds to HMS. .toTimeString(), really
+	static getHMS(timestamp: number): string {
+		if (timestamp < 0)
+			throw new Error("negative timestamps unsupported");
+		Math.round(timestamp);
+		let hours = Math.floor(timestamp / 3600);
+		timestamp = timestamp % 3600;
+		let minutes = Math.floor(timestamp / 60);
+		timestamp = timestamp % 60;
+		let seconds = Math.floor(timestamp);
+		
+		let strHours: string = (hours < 10 ? "0" : "") + hours;
+		let strMinutes: string = (minutes < 10 ? "0" : "") + minutes;
+		let strSeconds: string = (seconds < 10 ? "0" : "") + seconds;
+		return strHours + ":" + strMinutes + ":" + strSeconds;
+	}
 }
 
 class FrameSongDisplay {
@@ -164,14 +188,141 @@ class FrameWaveDisplay {
 	}
 }
 
+class UserComment {
+	constructor(fcd: FrameCommentsDisplay, 
+		nam: string, comment: string, timestamp: number, appendNow: boolean) {
+		const hms: string = Util.getHMS(timestamp);
+		const uc = Util.newDiv("usercomment");
+		
+		const nameElem = Util.newDiv("aName");
+		const commentElem = Util.newDiv("aComment");
+		const hmsElem = Util.newDiv("aHMS");
+		const origTS = Util.newDiv("aOrigTS");
+		
+		nameElem.innerText = nam;
+		if (comment.length > 1000)  // truncate longer comments
+			comment = comment.substring(0, 1000 - 3) + "...";
+		commentElem.innerText = comment;
+		hmsElem.innerText = hms;
+		origTS.innerText = "" + timestamp;
+		
+		uc.appendChild(nameElem);
+		uc.appendChild(commentElem);
+		uc.appendChild(hmsElem);
+		uc.appendChild(origTS);
+		
+		if (appendNow)
+			fcd.commsDiv.appendChild(uc);
+		else
+			return uc;
+	}
+}
+
 class FrameCommentsDisplay {
 	commsDiv: HTMLDivElement;
+	newCommentDiv: HTMLDivElement;
+	scrollTo(tsSec: number) {
+		let closest: HTMLDivElement = null;
+		// find closest
+		for (let i = 0; i < this.commsDiv.children.length; i++) {
+			const uc = <HTMLDivElement> this.commsDiv.children[i];
+			if (!closest) {
+				closest = uc;
+				continue;
+			}
+			const iOrigTS = <HTMLDivElement>
+				uc.getElementsByClassName("aOrigTS")[0];
+			const iDelta = Math.abs(tsSec - parseInt(iOrigTS.innerText, 10));
+			const cOrigTS = <HTMLDivElement>
+				closest.getElementsByClassName("aOrigTS")[0];
+			const cDelta = Math.abs(tsSec - parseInt(cOrigTS.innerText, 10));
+			if (iDelta < cDelta)
+				closest = uc;
+		}
+		closest.scrollIntoView();
+	}
 	populateSelf(): void {
-		// todo
+		fetch("/private/getcomments").then(resp => {
+			if (resp.ok)
+				return resp.json();
+			else
+				console.log("could not fetch comments");
+		}).then(json => {
+			for (const id in json) {
+				this.insertNewComment(json[id].nam, json[id].comment,
+					json[id].timestamp);
+				//new UserComment(this,
+				//	json[id].nam, json[id].comment, json[id].timestamp, true);
+			}
+		}).catch(e => {
+			console.log("fetch error: ", e);
+		});
+	}
+	insertNewComment(nam: string, text: string, ts: number) {
+		const nc = <HTMLDivElement> new UserComment(this, nam, text, ts, false);
+		if (this.commsDiv.children.length < 1) {  // comments div has 0 children
+			this.commsDiv.appendChild(nc);  // so insert at beginning
+			return;
+		}
+		
+		let i = 0;
+		let incumbent = this.commsDiv.children[i];
+		let incumbentTS = parseInt(
+				(incumbent.getElementsByClassName("aOrigTS")[0] as
+				HTMLDivElement).innerText, 10);
+		while (incumbentTS < ts) {  // warn: linear search
+			if (i + 1 === this.commsDiv.children.length) {  // insert at end
+				incumbent.insertAdjacentElement("afterend", nc);
+				return;
+			}
+			incumbent = this.commsDiv.children[++i];
+			incumbentTS = parseInt(
+				(incumbent.getElementsByClassName("aOrigTS")[0] as
+				HTMLDivElement).innerText, 10);
+		}
+		incumbent.insertAdjacentElement("beforebegin", nc);  // insert at middle
+		return;
+	}
+	setupNewCommentField(App: App): void {
+		this.newCommentDiv = Util.newDiv("fcd-newcomment");
+		const ncNameField = document.createElement("input");  // nc is new comm
+		ncNameField.className = "ncnamefield";
+		ncNameField.placeholder = "Username";
+		const ncTextField = document.createElement("textarea");
+		ncTextField.className = "nctextfield";
+		ncTextField.placeholder = "Comment";
+		const ncSubmitButton = document.createElement("button");
+		ncSubmitButton.className = "ncsubmitbutton";
+		ncSubmitButton.addEventListener("click", () => {
+			const ts: number = App.audio.currentTime;
+			const text: string = ncTextField.value;
+			const nam: string = ncNameField.value;
+			
+			const req = new Request("/private/setcomment", {
+				method: "POST",
+				body: JSON.stringify({
+					"nam": nam,
+					"comment": text,
+					"timestamp": ts + ""
+				})
+			});
+			fetch(req);
+			
+			this.insertNewComment(nam, text, ts);
+			
+			ncTextField.innerText = "";
+			ncNameField.innerText = "";
+		});
+		this.newCommentDiv.appendChild(ncNameField);
+		this.newCommentDiv.appendChild(ncTextField);
+		this.newCommentDiv.appendChild(ncSubmitButton);
 	}
 	constructor(App: App) {
 		this.commsDiv = Util.newDiv("fcd-comms");
+		this.setupNewCommentField(App);
+		
 		const commbarhost = App.getCommbarhost();
+		commbarhost.appendChild(this.newCommentDiv);
 		commbarhost.appendChild(this.commsDiv);
 		
 		this.populateSelf();
