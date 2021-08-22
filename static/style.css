@@ -115,7 +115,11 @@ canvas {
   grid-column: 1 / 2;
   display: grid;
   grid-template-rows: 100%;
-  grid-template-columns: 2fr 10fr 1fr;
+  grid-template-columns: 10% 1fr 15% 10%;
+}
+
+.nctsfield {
+  text-align: center;
 }
 
 .aComment, .aName {
@@ -136,4 +140,7 @@ canvas {
   user-select: none;
   border: 1px solid green;
   flex-grow: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }

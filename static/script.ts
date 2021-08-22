@@ -13,6 +13,7 @@ class Util {
 		ret.className = nam;
 		return ret;
 	}
+	// Pad single-digit numbers with a leading zero.
 	static formatToTwoDigits(n: number): string {
 		if (n < 0)
 			throw new Error("tried to parse unsupported number");
@@ -21,7 +22,7 @@ class Util {
 		else
 			return "" + n;
 	}
-	// Helper for constructor to convert seconds to HMS. .toTimeString(), really
+	// Convert seconds to HMS. (Does the same as .toTimeString(), really.)
 	static getHMS(timestamp: number): string {
 		if (timestamp < 0)
 			throw new Error("negative timestamps unsupported");
@@ -36,6 +37,20 @@ class Util {
 		let strMinutes: string = (minutes < 10 ? "0" : "") + minutes;
 		let strSeconds: string = (seconds < 10 ? "0" : "") + seconds;
 		return strHours + ":" + strMinutes + ":" + strSeconds;
+	}
+	// Convert HMS to seconds.
+	static fromHMS(tsRaw: string): number {
+		const tsArr: Array<string> = tsRaw.split(":");
+		let ts = 0;
+		let scale = 1;
+		for (let i = tsArr.length - 1; i >= 0; i--) {
+			let n: number = parseInt(tsArr[i], 10);
+			if (Number.isNaN(n))
+				n = 0;
+			ts += n * scale;
+			scale *= 60;
+		}
+		return ts;
 	}
 }
 
@@ -76,7 +91,7 @@ class FrameWaveDisplay {
 	App: App;
 	waveDiv: HTMLDivElement;
 	cv: HTMLCanvasElement;
-	wfCache: Array<HTMLCanvasElement>;  // warn: gets buggy (stale/corrupt data)
+	wfCache: Array<HTMLCanvasElement>;
 	
 	// Helper fn that returns true if host is little-endian.
 	isLE(): boolean {
@@ -213,6 +228,7 @@ class FrameWaveDisplay {
 	}
 }
 
+// An entry in the comments scrollbox.
 class UserComment {
 	constructor(fcd: FrameCommentsDisplay, 
 		nam: string, comment: string, timestamp: number, appendNow: boolean) {
@@ -243,6 +259,7 @@ class UserComment {
 	}
 }
 
+// The frame making up the comments scrollbox.
 class FrameCommentsDisplay {
 	id: string;
 	App: App;
@@ -290,11 +307,11 @@ class FrameCommentsDisplay {
 				this.tagTheWave(this.json[id].nam, this.json[id].timestamp);
 			}
 	}
-	tagTheWave(nam: string, ts: number) {  // todo: call in more places
+	tagTheWave(nam: string, ts: number) {
 		const idn = parseInt(this.id, 10);
 		if (!this.App.audioCache[idn] ||
 			Number.isNaN(this.App.audioCache[idn].duration)) {
-			console.log("debug: deferring wave-tagging");
+			//console.log("debug: deferring wave-tagging");
 			setTimeout(() => {
 				this.tagTheWave(nam, ts);
 			}, 500);  // promise poll hack
@@ -302,7 +319,7 @@ class FrameCommentsDisplay {
 		}
 		const waveDiv = this.fwd.waveDiv;
 		const wdBCR = waveDiv.getBoundingClientRect();
-		let xcoord = ts / this.App.audioCache[idn].duration * window.innerWidth;  // XXX
+		let xcoord = ts / this.App.audioCache[idn].duration * window.innerWidth;
 		if (xcoord + 25 > window.innerWidth)
 			xcoord = window.innerWidth - 25;
 		const ycoord = wdBCR.top + wdBCR.height - 25;
@@ -316,6 +333,9 @@ class FrameCommentsDisplay {
 		usq.addEventListener("click", () => {
 			this.scrollTo(ts);
 			this.App.audio.currentTime = ts;
+		});
+		usq.addEventListener("mouseover", () => {
+			this.scrollTo(ts);
 		});
 		waveDiv.appendChild(usq);
 	}
@@ -339,6 +359,7 @@ class FrameCommentsDisplay {
 			console.log("fetch error: ", e);
 		});
 	}
+	// Figure out where to and insert the comment into the comments box.
 	insertNewComment(id: string, nam: string, text: string, ts: number) {
 		const nc = <HTMLDivElement> new UserComment(this, nam, text, ts, false);
 		const num = Object.keys(this.json).length + 1;
@@ -373,19 +394,34 @@ class FrameCommentsDisplay {
 		incumbent.insertAdjacentElement("beforebegin", nc);  // insert at middle
 		return;
 	}
+	pollTimeForNewCommentTSField(): void {
+		const hms = Util.getHMS(this.App.audio.currentTime);
+		(this.newCommentDiv.getElementsByClassName("nctsfield")[0] as
+			HTMLInputElement).value = hms;
+	}
+	// Perform one-time initialisation of the comment entry fields.
 	setupNewCommentField(App: App): void {
 		this.newCommentDiv = Util.newDiv("fcd-newcomment");
 		const ncNameField = document.createElement("input");  // nc is new comm
 		ncNameField.className = "ncnamefield";
-		ncNameField.placeholder = "Username";
+		ncNameField.placeholder = "Name";
 		const ncTextField = document.createElement("textarea");
 		ncTextField.className = "nctextfield";
 		ncTextField.placeholder = "Comment";
+		const ncTSField = document.createElement("input");
+		ncTSField.className = "nctsfield";
+		//ncTSField.disabled = true;
+		ncTSField.value = "00:00";
+		setInterval(() => {
+			if (ncNameField.value === "" && ncTextField.value === "")
+				this.pollTimeForNewCommentTSField();
+		}, 250);
 		const ncSubmitButton = document.createElement("button");
 		ncSubmitButton.className = "ncsubmitbutton";
-		ncSubmitButton.innerText = "Post Comment";
+		ncSubmitButton.innerText = "Post";
 		ncSubmitButton.addEventListener("click", () => {
-			const ts: number = App.audio.currentTime;
+			const tsRaw: string = ncTSField.value; //App.audio.currentTime;
+			const ts = Util.fromHMS(tsRaw);
 			const text: string = ncTextField.value;
 			const nam: string = ncNameField.value;
 			
@@ -407,8 +443,10 @@ class FrameCommentsDisplay {
 		});
 		this.newCommentDiv.appendChild(ncNameField);
 		this.newCommentDiv.appendChild(ncTextField);
+		this.newCommentDiv.appendChild(ncTSField);
 		this.newCommentDiv.appendChild(ncSubmitButton);
 	}
+	// On frame resize, recreate all wave tags (usq things).
 	addWinResizeHandler(): void {
 		window.addEventListener("resize", () => {
 			if (!this.json)
@@ -425,6 +463,8 @@ class FrameCommentsDisplay {
 		this.fwd = fwd;
 		this.App = App;
 		this.json = null;
+		this.pollTimeForNewCommentTSField =
+			this.pollTimeForNewCommentTSField.bind(this);
 		this.commsDiv = Util.newDiv("fcd-comms");
 		this.setupNewCommentField(App);
 		
@@ -592,6 +632,7 @@ class App {
 				this.audioCache[id] = this.audio;  // cache it
 			}
 			this.audio.play();
+			fcd.pollTimeForNewCommentTSField();
 			this.setupWatcher(fwd);
 		});
 		
