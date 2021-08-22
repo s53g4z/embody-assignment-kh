@@ -130,7 +130,7 @@ class FrameWaveDisplay {
 		const ctx = cv.getContext("2d");
 		ctx.clearRect(0, 0, cv.width, cv.height);
 		ctx.lineWidth = cv.width / slots.length;
-		ctx.strokeStyle = "#ff0000ff";
+		ctx.strokeStyle = "#ffffffff";
 		const ctxHeight = cv.height;
 		for (let i = 0; i < slots.length; i++) {
 			const height = -slots[i] * ctxHeight / 2 + ctxHeight / 2;
@@ -320,13 +320,13 @@ class FrameCommentsDisplay {
 		const waveDiv = this.fwd.waveDiv;
 		const wdBCR = waveDiv.getBoundingClientRect();
 		let xcoord = ts / this.App.audioCache[idn].duration * window.innerWidth;
-		if (xcoord + 25 > window.innerWidth)
-			xcoord = window.innerWidth - 25;
-		const ycoord = wdBCR.top + wdBCR.height - 25;
+		if (xcoord + 50 > window.innerWidth)
+			xcoord = window.innerWidth - 50;
+		const ycoord = wdBCR.top + wdBCR.height - 50;
 		
 		const usq = Util.newDiv("usq");  // user comment represented by a square
-		usq.style.width = 25 + "px";
-		usq.style.height = 25 + "px";
+		usq.style.width = 50 + "px";
+		usq.style.height = 50 + "px";
 		usq.style.left = xcoord + "px";
 		usq.style.top = ycoord + "px";
 		usq.innerText = nam.substring(0, 1);
@@ -395,6 +395,8 @@ class FrameCommentsDisplay {
 		return;
 	}
 	pollTimeForNewCommentTSField(): void {
+		if (!this.App.audio)
+			return;
 		const hms = Util.getHMS(this.App.audio.currentTime);
 		(this.newCommentDiv.getElementsByClassName("nctsfield")[0] as
 			HTMLInputElement).value = hms;
@@ -405,7 +407,7 @@ class FrameCommentsDisplay {
 		const ncNameField = document.createElement("input");  // nc is new comm
 		ncNameField.className = "ncnamefield";
 		ncNameField.placeholder = "Name";
-		const ncTextField = document.createElement("textarea");
+		const ncTextField = document.createElement("input");
 		ncTextField.className = "nctextfield";
 		ncTextField.placeholder = "Comment";
 		const ncTSField = document.createElement("input");
@@ -500,7 +502,7 @@ class Bar {
 				}
 			}
 		});
-		ff.innerText = "Fast Forward"
+		ff.innerText = "Forward"
 		ff.addEventListener("click", () => {
 			App.tracks.then((tracks) => {
 				if (App.tracksIndex !== -1) {
@@ -577,7 +579,6 @@ class App {
 		if (shadows.length < 1) {
 			shadow = Util.newDiv("shadow");
 			shadow.style.position = "absolute";
-			shadow.style.backgroundColor = "rgba(255, 160, 0, 0.5)";
 			fwd.waveDiv.appendChild(shadow);
 		} else
 			shadow = shadows[0];
