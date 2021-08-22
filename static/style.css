@@ -115,3 +115,7 @@ canvas {
   grid-template-rows: 100%;
   grid-template-columns: 2fr 10fr 1fr;
 }
+
+.aComment, .aName {
+  word-break: break-word;
+}

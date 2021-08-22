@@ -76,6 +76,7 @@ class FrameWaveDisplay {
 	App: App;
 	waveDiv: HTMLDivElement;
 	cv: HTMLCanvasElement;
+	wfCache: Array<HTMLCanvasElement>;  // warn: gets buggy (stale/corrupt data)
 	
 	// Helper fn that returns true if host is little-endian.
 	isLE(): boolean {
@@ -108,14 +109,14 @@ class FrameWaveDisplay {
 		return slots;
 	}
 	// Helper fn to draw slots onto the canvas.
-	drawSlots(slots: Array<number>): void {
+	drawSlots(slots: Array<number>, id, cv): void {
 		this.normaliseVolume(slots);
 		
-		const ctx = this.cv.getContext("2d");
-		ctx.clearRect(0, 0, this.cv.width, this.cv.height);
-		ctx.lineWidth = this.cv.width / slots.length;
+		const ctx = cv.getContext("2d");
+		ctx.clearRect(0, 0, cv.width, cv.height);
+		ctx.lineWidth = cv.width / slots.length;
 		ctx.strokeStyle = "#ff0000ff";
-		const ctxHeight = this.cv.height;
+		const ctxHeight = cv.height;
 		for (let i = 0; i < slots.length; i++) {
 			const height = -slots[i] * ctxHeight / 2 + ctxHeight / 2;
 			ctx.beginPath();
@@ -123,6 +124,7 @@ class FrameWaveDisplay {
 			ctx.lineTo(i, height);
 			ctx.stroke();
 		}
+		//this.wfCache[id] = cv;
 	}
 	// Helper fn to increase the amplitude of the slots' samples.
 	normaliseVolume(slots: Array<number>): void {
@@ -135,7 +137,15 @@ class FrameWaveDisplay {
 		for (let i = 0; i < slots.length; i++)
 			slots[i] *= scale;
 	}
-	setTrack(path: string): void {
+	setTrack(path: string, idstr: string): void {
+		const id = parseInt(idstr, 10);
+		this.detachCurrentCV();
+		if (this.wfCache[id] !== undefined) {
+			this.attachCV(this.wfCache[id]);
+			return;
+		}
+		this.createCV();
+		this.wfCache[id] = this.cv;
 		fetch(path).then(resp => {
 			if (resp.ok)
 				return resp.arrayBuffer();
@@ -148,7 +158,8 @@ class FrameWaveDisplay {
 			const dv = new DataView(f32.buffer);
 			return this.generateSlots(dv, window.innerWidth);
 		}).then(slots => {
-			this.drawSlots(slots);
+			this.drawSlots(slots, id, this.wfCache[id]);
+			//this.wfCache[id] = this.cv;
 		}).catch((e) => {
 			console.log("audio malfunction: ", e);
 		});
@@ -170,19 +181,33 @@ class FrameWaveDisplay {
 			}
 		});
 	}
-	constructor(App: App) {
-		this.App = App;
-		this.waveDiv = Util.newDiv("fwd-wave");
-		this.App.app.appendChild(this.waveDiv);
-		
+	// Detach this.cv from this.cv and the DOM.
+	detachCurrentCV(): void {
+		if (this.cv) {
+			this.cv.parentNode.removeChild(this.cv);
+			this.cv = null;
+		}
+	}
+	// Attach cv to this.cv and the DOM.
+	attachCV(cv: HTMLCanvasElement): void {
+		this.cv = cv;
+		this.waveDiv.appendChild(this.cv);
+	}
+	// Create a <canvas> out of thin air, and attach it to this.cv.
+	createCV(): void {
 		this.cv = document.createElement("canvas");
 		this.cv.className = "waveformscanvas";
-		this.waveDiv.appendChild(this.cv);
+		this.attachCV(this.cv);
 		const cvBCR = this.cv.getBoundingClientRect();
 		this.cv.width = cvBCR.width;
 		this.cv.height = cvBCR.height;
-		
 		this.addEventListenersToCanvas();
+	}
+	constructor(App: App) {
+		this.App = App;
+		this.wfCache = new Array<HTMLCanvasElement>();
+		this.waveDiv = Util.newDiv("fwd-wave");
+		this.App.app.appendChild(this.waveDiv);
 		
 		return this;
 	}
@@ -219,8 +244,10 @@ class UserComment {
 }
 
 class FrameCommentsDisplay {
+	id: string;
 	commsDiv: HTMLDivElement;
 	newCommentDiv: HTMLDivElement;
+	json: {};
 	scrollTo(tsSec: number) {
 		let closest: HTMLDivElement = null;
 		// find closest
@@ -241,6 +268,17 @@ class FrameCommentsDisplay {
 		}
 		closest.scrollIntoView();
 	}
+	refreshComments(id: string): void {
+		if (!this.json)
+			return this.populateSelf();
+		this.id = id;
+		this.commsDiv.innerHTML = "";  // delete stale comments
+		for (const id in this.json)
+			if (this.json[id].track === parseInt(this.id, 10))
+				this.insertNewComment(id,
+					this.json[id].nam, this.json[id].comment,
+					this.json[id].timestamp);
+	}
 	populateSelf(): void {
 		fetch("/private/getcomments").then(resp => {
 			if (resp.ok)
@@ -248,18 +286,29 @@ class FrameCommentsDisplay {
 			else
 				console.log("could not fetch comments");
 		}).then(json => {
+			this.json = json;
+			// add new comments
 			for (const id in json) {
-				this.insertNewComment(json[id].nam, json[id].comment,
+				if (json[id].track !== parseInt(this.id, 10))
+					continue;
+				this.insertNewComment(id, json[id].nam, json[id].comment,
 					json[id].timestamp);
-				//new UserComment(this,
-				//	json[id].nam, json[id].comment, json[id].timestamp, true);
 			}
 		}).catch(e => {
 			console.log("fetch error: ", e);
 		});
 	}
-	insertNewComment(nam: string, text: string, ts: number) {
+	insertNewComment(id: string, nam: string, text: string, ts: number) {
 		const nc = <HTMLDivElement> new UserComment(this, nam, text, ts, false);
+		const num = Object.keys(this.json).length + 1;
+		if (id === "-1")
+			this.json[num] = {
+				"nam": nam,
+				"comment": text,
+				"timestamp": ts,
+				"track": parseInt(this.id, 10)
+			};
+		//console.log(this.json);
 		if (this.commsDiv.children.length < 1) {  // comments div has 0 children
 			this.commsDiv.appendChild(nc);  // so insert at beginning
 			return;
@@ -293,6 +342,7 @@ class FrameCommentsDisplay {
 		ncTextField.placeholder = "Comment";
 		const ncSubmitButton = document.createElement("button");
 		ncSubmitButton.className = "ncsubmitbutton";
+		ncSubmitButton.innerText = "Post Comment";
 		ncSubmitButton.addEventListener("click", () => {
 			const ts: number = App.audio.currentTime;
 			const text: string = ncTextField.value;
@@ -303,21 +353,24 @@ class FrameCommentsDisplay {
 				body: JSON.stringify({
 					"nam": nam,
 					"comment": text,
-					"timestamp": ts + ""
+					"timestamp": ts + "",
+					"track": this.id
 				})
 			});
 			fetch(req);
 			
-			this.insertNewComment(nam, text, ts);
+			this.insertNewComment("-1", nam, text, ts);
 			
-			ncTextField.innerText = "";
-			ncNameField.innerText = "";
+			ncTextField.value = "";
+			ncNameField.value = "";
 		});
 		this.newCommentDiv.appendChild(ncNameField);
 		this.newCommentDiv.appendChild(ncTextField);
 		this.newCommentDiv.appendChild(ncSubmitButton);
 	}
-	constructor(App: App) {
+	constructor(App: App, id: string) {
+		this.id = id;
+		this.json = null;
 		this.commsDiv = Util.newDiv("fcd-comms");
 		this.setupNewCommentField(App);
 		
@@ -325,14 +378,16 @@ class FrameCommentsDisplay {
 		commbarhost.appendChild(this.newCommentDiv);
 		commbarhost.appendChild(this.commsDiv);
 		
-		this.populateSelf();
+		//this.populateSelf();
+		return this;
 	}
 }
 
 class Bar {
 	// Helper for constructor to add event listeners to bar buttons.
 	addEventListeners(App: App, play: HTMLDivElement, ff: HTMLDivElement,
-		rw: HTMLDivElement, fsd: FrameSongDisplay, fwd: FrameWaveDisplay) {
+		rw: HTMLDivElement, fsd: FrameSongDisplay, fwd: FrameWaveDisplay,
+		fcd: FrameCommentsDisplay) {
 		play.innerText = "Play"
 		play.addEventListener("click", () => {
 			if (Util.currTrack && Util.currTrack.filepath) {
@@ -357,7 +412,7 @@ class Bar {
 					App.tracksIndex++;
 					if (App.tracksIndex > Object.keys(tracks).length)
 						App.tracksIndex = 1;  // {1: {}, 2: {}}
-					App.populateAudio(App.tracksIndex + "", fsd, fwd);
+					App.populateAudio(App.tracksIndex + "", fsd, fwd, fcd);
 					play.innerText = "Pause";
 				}
 			});
@@ -369,13 +424,14 @@ class Bar {
 					App.tracksIndex--;
 					if (App.tracksIndex <= 0)
 						App.tracksIndex = Object.keys(tracks).length;
-					App.populateAudio(App.tracksIndex + "", fsd, fwd);
+					App.populateAudio(App.tracksIndex + "", fsd, fwd, fcd);
 					play.innerText = "Pause";
 				}
 			});
 		});
 	}
-	constructor(App: App, fsd: FrameSongDisplay, fwd: FrameWaveDisplay) {
+	constructor(App: App, fsd: FrameSongDisplay, fwd: FrameWaveDisplay,
+		fcd: FrameCommentsDisplay) {
 		const bar = Util.newDiv("bar");
 		const play = Util.newDiv("play");
 		const ff = Util.newDiv("ff");
@@ -383,7 +439,7 @@ class Bar {
 		bar.appendChild(ff);
 		bar.appendChild(play);
 		bar.appendChild(rw);
-		this.addEventListeners(App, play, ff, rw, fsd, fwd);
+		this.addEventListeners(App, play, ff, rw, fsd, fwd, fcd);
 		
 		const commbarhost = App.getCommbarhost();
 		commbarhost.appendChild(bar);
@@ -395,6 +451,7 @@ class App {
 	audio: HTMLAudioElement;
 	watcherID: number;
 	commbarhost: HTMLDivElement;  // hosting div for comments and play/pause bar
+	audioCache: Array<HTMLAudioElement>;
 	tracks: Promise<{
 		[track: string]: {
 			artist: string,
@@ -432,9 +489,11 @@ class App {
 		return shadow;
 	}
 	setupWatcher(fwd: FrameWaveDisplay): void {
+		if (this.watcherID !== 0)
+			return;
 		const shadow = this.getShadow(fwd);
-		clearInterval(this.watcherID);
-		this.watcherID = setInterval(() => {
+		clearInterval(this.watcherID);  // destroy any old watcher
+		this.watcherID = setInterval(() => {  // set up a new watcher
 			const currTime = this.audio.currentTime;
 			const duration = this.audio.duration;
 			const frac = currTime / duration;
@@ -455,22 +514,28 @@ class App {
 			}
 		}, 100);
 	}
-	populateAudio(id: string,
-		fsd: FrameSongDisplay, fwd: FrameWaveDisplay): void {
+	// Change the current song.
+	populateAudio(idstr: string,
+		fsd: FrameSongDisplay, fwd: FrameWaveDisplay, fcd: FrameCommentsDisplay):
+		void {
+		const id = parseInt(idstr, 10);
 		if (this.audio)
 			this.audio.pause();
 		this.tracks.then((tracks) => {
-			this.tracksIndex = parseInt(id);
+			this.tracksIndex = id;
 			Util.currTrack = tracks[id];
 			const track = tracks[id];
 			fsd.setTitle(track.nam);
 			fsd.setArtist(track.artist);
 			fsd.setImg(track.picpath, this);
-			fwd.setTrack(track.filepath);
-			if (!this.audio)
+			fwd.setTrack(track.filepath, id + "");
+			fcd.refreshComments(id + "");
+			if (this.audioCache[id] !== undefined)  // use cached copy
+				this.audio = this.audioCache[id];
+			else {  // fetch new copy
 				this.audio = new Audio(track.filepath);
-			else
-				this.audio.src = track.filepath;
+				this.audioCache[id] = this.audio;  // cache it
+			}
 			this.audio.play();
 			this.setupWatcher(fwd);
 		});
@@ -479,16 +544,18 @@ class App {
 	constructor() {
 		this.commbarhost = null;
 		this.audio = null;
+		this.watcherID = 0;
+		this.audioCache = new Array<HTMLAudioElement>();
 		this.tracksIndex = -1;
 		this.app = Util.newDiv("app");
 		document.body.appendChild(this.app);
 		const fsd = new FrameSongDisplay(this.app);
 		const fwd = new FrameWaveDisplay(this);
-		new FrameCommentsDisplay(this);
-		new Bar(this, fsd, fwd);
+		const fcd = new FrameCommentsDisplay(this, "1");
+		new Bar(this, fsd, fwd, fcd);
 		
 		this.getAudio();
-		this.populateAudio("1", fsd, fwd);
+		this.populateAudio("1", fsd, fwd, fcd);
 	}
 }
 

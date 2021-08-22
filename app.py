@@ -51,6 +51,7 @@ def comments(name = None):
 				"nam": row[1],
 				"comment": row[2],
 				"timestamp": row[3],
+				"track": row[4]
 			}
 		})
 	return dict
@@ -59,12 +60,12 @@ def comments(name = None):
 def comment(name = None):
 	if rq.method == "POST":
 		json = rq.get_json(force=True);
-		if "nam" in json and "comment" in json and "timestamp" in json:
+		if "nam" in json and "comment" in json and "timestamp" in json and "track" in json:
 			db = getDB()
 			cur = db.cursor()
-			cur.execute("INSERT INTO comments1 (nam,comment,timestamp) " +
-				"VALUES (?, ?, ?);",
-				(json["nam"], json["comment"], json["timestamp"]))
+			cur.execute("INSERT INTO comments1 (nam,comment,timestamp,track) " +
+				"VALUES (?, ?, ?, ?);",
+				(json["nam"], json["comment"], json["timestamp"], json["track"]))
 			db.commit()
 		else:
 			print("not inserting corrupted POST data")
