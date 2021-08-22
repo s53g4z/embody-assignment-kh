@@ -216,20 +216,22 @@ class UserComment {
     }
 }
 class FrameCommentsDisplay {
-    constructor(App, id) {
+    constructor(App, fwd, id) {
         this.id = id;
+        this.fwd = fwd;
+        this.App = App;
         this.json = null;
         this.commsDiv = Util.newDiv("fcd-comms");
         this.setupNewCommentField(App);
         const commbarhost = App.getCommbarhost();
         commbarhost.appendChild(this.newCommentDiv);
         commbarhost.appendChild(this.commsDiv);
-        //this.populateSelf();
+        this.addWinResizeHandler(); // mostly for repositioning the wave tags
         return this;
     }
     scrollTo(tsSec) {
         let closest = null;
-        // find closest
+        // find closest. linear search -.-
         for (let i = 0; i < this.commsDiv.children.length; i++) {
             const uc = this.commsDiv.children[i];
             if (!closest) {
@@ -245,14 +247,50 @@ class FrameCommentsDisplay {
         }
         closest.scrollIntoView();
     }
+    destroyAllWaveTags() {
+        const usqs = document.getElementsByClassName("usq");
+        while (usqs.length > 0)
+            usqs[0].parentNode.removeChild(usqs[0]);
+    }
     refreshComments(id) {
         if (!this.json)
             return this.populateSelf();
         this.id = id;
         this.commsDiv.innerHTML = ""; // delete stale comments
+        this.destroyAllWaveTags();
         for (const id in this.json)
-            if (this.json[id].track === parseInt(this.id, 10))
+            if (this.json[id].track === parseInt(this.id, 10)) {
                 this.insertNewComment(id, this.json[id].nam, this.json[id].comment, this.json[id].timestamp);
+                this.tagTheWave(this.json[id].nam, this.json[id].timestamp);
+            }
+    }
+    tagTheWave(nam, ts) {
+        const idn = parseInt(this.id, 10);
+        if (!this.App.audioCache[idn] ||
+            Number.isNaN(this.App.audioCache[idn].duration)) {
+            console.log("debug: deferring wave-tagging");
+            setTimeout(() => {
+                this.tagTheWave(nam, ts);
+            }, 500); // promise poll hack
+            return;
+        }
+        const waveDiv = this.fwd.waveDiv;
+        const wdBCR = waveDiv.getBoundingClientRect();
+        let xcoord = ts / this.App.audioCache[idn].duration * window.innerWidth; // XXX
+        if (xcoord + 25 > window.innerWidth)
+            xcoord = window.innerWidth - 25;
+        const ycoord = wdBCR.top + wdBCR.height - 25;
+        const usq = Util.newDiv("usq"); // user comment represented by a square
+        usq.style.width = 25 + "px";
+        usq.style.height = 25 + "px";
+        usq.style.left = xcoord + "px";
+        usq.style.top = ycoord + "px";
+        usq.innerText = nam.substring(0, 1);
+        usq.addEventListener("click", () => {
+            this.scrollTo(ts);
+            this.App.audio.currentTime = ts;
+        });
+        waveDiv.appendChild(usq);
     }
     populateSelf() {
         fetch("/private/getcomments").then(resp => {
@@ -267,6 +305,7 @@ class FrameCommentsDisplay {
                 if (json[id].track !== parseInt(this.id, 10))
                     continue;
                 this.insertNewComment(id, json[id].nam, json[id].comment, json[id].timestamp);
+                this.tagTheWave(json[id].nam, json[id].timestamp);
             }
         }).catch(e => {
             console.log("fetch error: ", e);
@@ -282,7 +321,7 @@ class FrameCommentsDisplay {
                 "timestamp": ts,
                 "track": parseInt(this.id, 10)
             };
-        //console.log(this.json);
+        this.tagTheWave(nam, ts);
         if (this.commsDiv.children.length < 1) { // comments div has 0 children
             this.commsDiv.appendChild(nc); // so insert at beginning
             return;
@@ -333,6 +372,16 @@ class FrameCommentsDisplay {
         this.newCommentDiv.appendChild(ncNameField);
         this.newCommentDiv.appendChild(ncTextField);
         this.newCommentDiv.appendChild(ncSubmitButton);
+    }
+    addWinResizeHandler() {
+        window.addEventListener("resize", () => {
+            if (!this.json)
+                return;
+            this.destroyAllWaveTags();
+            for (const id in this.json)
+                if (this.json[id].track == parseInt(this.id, 10))
+                    this.tagTheWave(this.json[id].nam, this.json[id].timestamp);
+        });
     }
 }
 class Bar {
@@ -406,7 +455,7 @@ class App {
         document.body.appendChild(this.app);
         const fsd = new FrameSongDisplay(this.app);
         const fwd = new FrameWaveDisplay(this);
-        const fcd = new FrameCommentsDisplay(this, "1");
+        const fcd = new FrameCommentsDisplay(this, fwd, "1");
         new Bar(this, fsd, fwd, fcd);
         this.getAudio();
         this.populateAudio("1", fsd, fwd, fcd);

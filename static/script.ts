@@ -245,12 +245,14 @@ class UserComment {
 
 class FrameCommentsDisplay {
 	id: string;
+	App: App;
+	fwd: FrameWaveDisplay;
 	commsDiv: HTMLDivElement;
 	newCommentDiv: HTMLDivElement;
 	json: {};
 	scrollTo(tsSec: number) {
 		let closest: HTMLDivElement = null;
-		// find closest
+		// find closest. linear search -.-
 		for (let i = 0; i < this.commsDiv.children.length; i++) {
 			const uc = <HTMLDivElement> this.commsDiv.children[i];
 			if (!closest) {
@@ -268,16 +270,54 @@ class FrameCommentsDisplay {
 		}
 		closest.scrollIntoView();
 	}
+	destroyAllWaveTags(): void {
+		const usqs = document.getElementsByClassName("usq");
+		while(usqs.length > 0)
+			usqs[0].parentNode.removeChild(usqs[0]);
+	}
 	refreshComments(id: string): void {
 		if (!this.json)
 			return this.populateSelf();
 		this.id = id;
 		this.commsDiv.innerHTML = "";  // delete stale comments
+		this.destroyAllWaveTags();
+		
 		for (const id in this.json)
-			if (this.json[id].track === parseInt(this.id, 10))
+			if (this.json[id].track === parseInt(this.id, 10)) {
 				this.insertNewComment(id,
 					this.json[id].nam, this.json[id].comment,
 					this.json[id].timestamp);
+				this.tagTheWave(this.json[id].nam, this.json[id].timestamp);
+			}
+	}
+	tagTheWave(nam: string, ts: number) {  // todo: call in more places
+		const idn = parseInt(this.id, 10);
+		if (!this.App.audioCache[idn] ||
+			Number.isNaN(this.App.audioCache[idn].duration)) {
+			console.log("debug: deferring wave-tagging");
+			setTimeout(() => {
+				this.tagTheWave(nam, ts);
+			}, 500);  // promise poll hack
+			return;
+		}
+		const waveDiv = this.fwd.waveDiv;
+		const wdBCR = waveDiv.getBoundingClientRect();
+		let xcoord = ts / this.App.audioCache[idn].duration * window.innerWidth;  // XXX
+		if (xcoord + 25 > window.innerWidth)
+			xcoord = window.innerWidth - 25;
+		const ycoord = wdBCR.top + wdBCR.height - 25;
+		
+		const usq = Util.newDiv("usq");  // user comment represented by a square
+		usq.style.width = 25 + "px";
+		usq.style.height = 25 + "px";
+		usq.style.left = xcoord + "px";
+		usq.style.top = ycoord + "px";
+		usq.innerText = nam.substring(0, 1);
+		usq.addEventListener("click", () => {
+			this.scrollTo(ts);
+			this.App.audio.currentTime = ts;
+		});
+		waveDiv.appendChild(usq);
 	}
 	populateSelf(): void {
 		fetch("/private/getcomments").then(resp => {
@@ -293,6 +333,7 @@ class FrameCommentsDisplay {
 					continue;
 				this.insertNewComment(id, json[id].nam, json[id].comment,
 					json[id].timestamp);
+				this.tagTheWave(json[id].nam, json[id].timestamp);
 			}
 		}).catch(e => {
 			console.log("fetch error: ", e);
@@ -308,7 +349,7 @@ class FrameCommentsDisplay {
 				"timestamp": ts,
 				"track": parseInt(this.id, 10)
 			};
-		//console.log(this.json);
+		this.tagTheWave(nam, ts);
 		if (this.commsDiv.children.length < 1) {  // comments div has 0 children
 			this.commsDiv.appendChild(nc);  // so insert at beginning
 			return;
@@ -368,8 +409,21 @@ class FrameCommentsDisplay {
 		this.newCommentDiv.appendChild(ncTextField);
 		this.newCommentDiv.appendChild(ncSubmitButton);
 	}
-	constructor(App: App, id: string) {
+	addWinResizeHandler(): void {
+		window.addEventListener("resize", () => {
+			if (!this.json)
+				return;
+			
+			this.destroyAllWaveTags();
+			for (const id in this.json)
+				if (this.json[id].track == parseInt(this.id, 10))
+					this.tagTheWave(this.json[id].nam, this.json[id].timestamp);
+		});
+	}
+	constructor(App: App, fwd: FrameWaveDisplay, id: string) {
 		this.id = id;
+		this.fwd = fwd;
+		this.App = App;
 		this.json = null;
 		this.commsDiv = Util.newDiv("fcd-comms");
 		this.setupNewCommentField(App);
@@ -378,7 +432,8 @@ class FrameCommentsDisplay {
 		commbarhost.appendChild(this.newCommentDiv);
 		commbarhost.appendChild(this.commsDiv);
 		
-		//this.populateSelf();
+		this.addWinResizeHandler();  // mostly for repositioning the wave tags
+		
 		return this;
 	}
 }
@@ -551,7 +606,7 @@ class App {
 		document.body.appendChild(this.app);
 		const fsd = new FrameSongDisplay(this.app);
 		const fwd = new FrameWaveDisplay(this);
-		const fcd = new FrameCommentsDisplay(this, "1");
+		const fcd = new FrameCommentsDisplay(this, fwd, "1");
 		new Bar(this, fsd, fwd, fcd);
 		
 		this.getAudio();
